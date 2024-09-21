@@ -1,0 +1,194 @@
+
+const int PIN_IMU_INT = 18;
+const int PIN_S1 = 14;
+const int PIN_S2 = 27;
+
+/*enum class Command : byte
+  {
+  GET_RPW = 1
+  };
+
+  Command command = Command::GET_RPW;*/
+
+IMU imu;
+
+float *rpw;
+int s1Status = HIGH;
+int s2Status = HIGH;
+int pinzas = false;
+
+// Direccion MAC del slave (reemplazar con el que habeis obtenido)
+uint8_t slaveMacAddress[] = {0x7c, 0x9e, 0xbd, 0x61, 0xa1, 0x34};
+// Esta es la estructura de los datos que enviaremos
+typedef struct {
+  float roll;
+  float pitch;
+  float yaw;
+  int s1Pinzas;
+  int s2Pinzas;
+} TxMessage;
+// Creamos una varaible con la estructura recien creada
+TxMessage dataToSlave;
+
+
+// Esta es la estructura de los datos que reciviremos
+typedef struct {
+  float torque;
+  float torque1;
+  float torque2;
+} RxMessage;
+// Creamos una varaible con la estructura recien creada
+RxMessage dataFromSlave;
+
+// Funcion que se ejecutara cada vez que se haya recibido un mensaje
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  // Copiamos los datos recibidos a nuestra variable dataFromSlave
+  memcpy(&dataFromSlave, incomingData, sizeof(dataFromSlave));
+  //Serial.print("Torque received:\t");
+  //Serial.println(dataFromSlave.torque, DEC);
+  //Serial.println(dataFromSlave.torque1, DEC);
+  //Serial.println(dataFromSlave.torque2, DEC);
+}
+
+// Direccion MAC del slave (reemplazar con el que habeis obtenido)
+uint8_t slavecomputerMacAddress[] = {0x7c, 0x9e, 0xbd, 0x66, 0xe2, 0x58};
+// Esta es la estructura de los datos que enviaremos
+typedef struct {
+  float roll;
+  float pitch;
+  float yaw;
+  float torque;
+  float torque1;
+  float torque2;
+  int s1Robot;
+  int s2Robot;
+  int s1Pinzas;
+  int s2Pinzas;
+} Tx2Message;
+// Creamos una varaible con la estructura recien creada
+Tx2Message dataToSlaveComputer;
+
+void setup()
+{
+
+  Serial.begin(115200);
+
+  pinMode(PIN_IMU_INT, INPUT_PULLUP);
+  pinMode(PIN_S1, INPUT);
+  pinMode(PIN_S2, INPUT);
+
+  imu.Install();
+  // Habilitamos el WiFi en modo estacion
+  WiFi.mode(WIFI_STA);
+
+  // Inicializamos ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    //Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Registramos el slave
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, slaveMacAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+
+  // Anadimos el slave
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    //Serial.println("Failed to add peer");
+    return;
+  }
+  // Configuramos la funcion a utilizar cada vez que se reciva
+  // un mensaje
+  esp_now_register_recv_cb(OnDataRecv);
+
+  // Registramos el slave computer
+  esp_now_peer_info_t peerInfo_computer = {};
+  memcpy(peerInfo_computer.peer_addr, slavecomputerMacAddress, 6);
+  peerInfo_computer.channel = 1;
+  peerInfo_computer.encrypt = false;
+
+  // Anadimos el slave
+  if (esp_now_add_peer(&peerInfo_computer) != ESP_OK) {
+    //Serial.println("Failed to add peer");
+    return;
+  }
+
+}
+
+
+void loop()
+{
+
+  if (digitalRead(PIN_IMU_INT) == HIGH)
+  {
+    imu.ReadSensor();
+    rpw = imu.GetRPW();
+  }
+
+  s1Status = digitalRead(PIN_S1);
+  s2Status = digitalRead(PIN_S2);
+
+    s1Status = digitalRead(PIN_S1);
+    delay(10);
+    s2Status = digitalRead(PIN_S2);
+    delay(10);
+    if (s1Status == LOW && s2Status == LOW){
+    pinzas ^= true; //if pinzas = false then pinzas = true
+                    //if pinzas = true then pinzas = false
+    }
+
+  // Como ejemplo, enviaremos un numero que iremos incrementando
+  esp_err_t result = esp_now_send(slaveMacAddress, (uint8_t *) &dataToSlave, sizeof(dataToSlave));
+
+  delay(10);
+
+  esp_err_t result_computer = esp_now_send(slavecomputerMacAddress, (uint8_t *) &dataToSlaveComputer, sizeof(dataToSlaveComputer));
+
+  if (result == ESP_OK) {
+    //Serial.println("Sent with success");
+  }
+  else {
+    //Serial.println("Error sending the data");
+  }
+  dataToSlave.roll = rpw[0];
+  dataToSlave.pitch = rpw[1];
+  dataToSlave.yaw = rpw[2];
+  //Serial.println(dataToSlave.pitch);
+
+  delay(10);
+
+  dataToSlaveComputer.roll = rpw[0];
+  dataToSlaveComputer.pitch = rpw[1];
+  dataToSlaveComputer.yaw = rpw[2];
+  dataToSlaveComputer.torque = dataFromSlave.torque;
+  dataToSlaveComputer.torque1 = dataFromSlave.torque1;
+  dataToSlaveComputer.torque2 = dataFromSlave.torque2;
+  if (pinzas == false) {
+    dataToSlaveComputer.s1Robot = s1Status;
+    dataToSlaveComputer.s2Robot = s2Status;
+    dataToSlaveComputer.s1Pinzas = true;
+    dataToSlaveComputer.s2Pinzas = true;
+    dataToSlave.s1Pinzas = true;
+    dataToSlave.s2Pinzas = true;
+  } else {
+    //giro servo4
+    dataToSlave.s1Pinzas = s1Status;
+    dataToSlave.s2Pinzas = s2Status;
+    dataToSlaveComputer.s2Pinzas = s1Status;
+    dataToSlaveComputer.s2Pinzas = s1Status;
+    dataToSlaveComputer.s1Robot = true;
+    dataToSlaveComputer.s2Robot = true;
+  }
+  Serial.println(s2Status, DEC);
+  Serial.print("\t");
+  Serial.println(s1Status, DEC) ;
+  Serial.print("\t");
+  Serial.println(pinzas, DEC);
+
+  delay (10);
+
+}
+
+
+

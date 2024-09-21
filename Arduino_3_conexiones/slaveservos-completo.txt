@@ -1,0 +1,209 @@
+
+// Declaramos una variable para el servo
+Servo servoMotor;
+Servo servoMotor1;
+Servo servoMotor2;
+Servo servoMotor3;
+
+const float Rshunt = 1.6;
+const float Rshunt1 = 1.6;
+const float Rshunt2 = 1.6;
+const float Rshunt3 = 1.6;
+
+float torque = 0;
+float torque1 = 0;
+float torque2 = 0;
+int s1Status;
+int s2Status;
+
+float getCurrent(uint32_t integrationTimeMs) {
+
+  uint32_t startTime = millis();
+  float integratedCurrent = 0;
+
+  // Vamos sumando la medicion de corriente durante el tiempo
+  // fijado integrationTimeMs (en milisegundos)
+  while (millis() < startTime + integrationTimeMs) {
+    uint16_t adcValue = analogRead(34);
+    integratedCurrent = integratedCurrent + ((float)adcValue / 4095.0 * 3.3) / Rshunt;
+  }
+
+  return integratedCurrent;
+
+}
+
+float getCurrent1(uint32_t integrationTimeMs1) {
+
+  uint32_t startTime1 = millis();
+  float integratedCurrent1 = 0;
+
+  // Vamos sumando la medicion de corriente durante el tiempo
+  // fijado integrationTimeMs (en milisegundos)
+  while (millis() < startTime1 + integrationTimeMs1) {
+    uint16_t adcValue1 = analogRead(36);
+    integratedCurrent1 = integratedCurrent1 + ((float)adcValue1 / 4095.0 * 3.3) / Rshunt1;
+  }
+
+  return integratedCurrent1;
+
+}
+
+float getCurrent2(uint32_t integrationTimeMs2) {
+
+  uint32_t startTime2 = millis();
+  float integratedCurrent2 = 0;
+
+  // Vamos sumando la medicion de corriente durante el tiempo
+  // fijado integrationTimeMs (en milisegundos)
+  while (millis() < startTime2 + integrationTimeMs2) {
+    uint16_t adcValue2 = analogRead(35);
+    integratedCurrent2 = integratedCurrent2 + ((float)adcValue2 / 4095.0 * 3.3) / Rshunt2;
+  }
+
+  return integratedCurrent2;
+
+}
+
+
+// Direccion MAC del master (reemplazar con el que habeis obtenido)
+uint8_t masterMacAddress[] = {0x94, 0xb9, 0x7e, 0xc4, 0x90, 0x30};
+
+// Esta es la estructura de los datos que enviaremos
+typedef struct {
+  float torque;
+  float torque1;
+  float torque2;
+} TxMessage;
+// Creamos una varaible con la estructura recien creada
+TxMessage dataToMaster;
+
+// Esta es la estructura de los datos que reciviremos
+typedef struct {
+  float roll;
+  float pitch;
+  float yaw;
+  int s1Pinzas;
+  int s2Pinzas;
+} RxMessage;
+// Creamos una varaible con la estructura recien creada
+RxMessage dataFromMaster;
+
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  // Copiamos los datos recibidos a nuestra variable dataFromMaster
+  memcpy(&dataFromMaster, incomingData, sizeof(dataFromMaster));
+  //Serial.print("Example number received:\t");
+  //Serial.println(dataFromMaster.roll, DEC);
+  //Serial.println(dataFromMaster.pitch, DEC);
+  //Serial.println(dataFromMaster.yaw, DEC);
+}
+void setup() {
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Registramos el master
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, masterMacAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+
+  // Anadimos el master
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Failed to add peer");
+    return;
+  }
+
+  esp_now_register_recv_cb(OnDataRecv);
+
+
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+  servoMotor.setPeriodHertz(50);
+  servoMotor1.setPeriodHertz(50);
+  servoMotor2.setPeriodHertz(50);
+  servoMotor3.setPeriodHertz(50);
+
+  servoMotor.attach(33);
+  servoMotor1.attach(25);
+  servoMotor2.attach(32);
+  servoMotor3.attach(27);
+
+  pinMode(34, INPUT);
+  pinMode(26, INPUT);
+  pinMode(35, INPUT);
+
+  Serial.println("Servo position: 0º");
+  servoMotor.write(90);
+  servoMotor1.write(90);
+  servoMotor2.write(90);
+  servoMotor3.write(90);
+  delay(2000);
+
+  //torque = getCurrent(20);
+  //Serial.print("Initial current:\t");
+  /*Serial.println(torque, DEC);
+
+    Serial.println("Servo position: 45º");
+    servoMotor.write(135);*/
+}
+
+void loop() {
+
+  // Como ejemplo, enviaremos un numero que iremos incrementando
+  // emulando el torque
+  esp_err_t result = esp_now_send(masterMacAddress, (uint8_t *) &dataToMaster, sizeof(dataToMaster));
+
+  if (result == ESP_OK) {
+    //Serial.println("Sent with success");
+
+  }
+  else {
+    Serial.println("Error sending the data");
+  }
+  servoMotor.write(dataFromMaster.roll);
+  servoMotor1.write(dataFromMaster.pitch);
+  servoMotor2.write(dataFromMaster.yaw);
+
+  if (dataFromMaster.roll > 180 && dataFromMaster.roll < 270) {
+    servoMotor.write(180);
+  } else if (dataFromMaster.roll > 270 && dataFromMaster.roll < 360) {
+    servoMotor.write(0);
+  }
+
+  if (dataFromMaster.yaw > 180 && dataFromMaster.yaw < 270) {
+    servoMotor2.write(180);
+  } else if (dataFromMaster.yaw > 270 && dataFromMaster.yaw < 360) {
+    servoMotor2.write(0);
+  }
+
+  if (dataFromMaster.pitch > 0 && dataFromMaster.pitch < 90) {
+    servoMotor1.write(dataFromMaster.pitch + 90);
+  } else if (dataFromMaster.pitch > 270 && dataFromMaster.pitch < 360) {
+    servoMotor1.write(dataFromMaster.pitch - 270);
+  }
+
+  if (dataFromMaster.s1Pinzas == LOW && dataFromMaster.s2Pinzas == LOW) {
+    servoMotor3.write(180);
+  }
+  else if (dataFromMaster.s1Pinzas == HIGH && dataFromMaster.s2Pinzas == HIGH) {
+    servoMotor3.write(0);
+  }
+
+  dataToMaster.torque = getCurrent(20);
+  dataToMaster.torque1 = getCurrent1(20);
+  dataToMaster.torque2 = getCurrent2(20);
+  Serial.println(dataFromMaster.s1Pinzas, DEC);
+  Serial.print("\t");
+  Serial.println(dataFromMaster.s2Pinzas, DEC);
+
+  delay(10);
+
+
+
+}
